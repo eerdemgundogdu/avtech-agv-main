@@ -1,0 +1,9 @@
+# Manuel kontrol (avtech_brain.py) icin gerekenler
+pyserial>=3.5
+flask>=2.3.0
+flask-socketio>=5.3.0
+simple-websocket>=1.0   # GUI <-> Jetson gercek WebSocket (yoksa long-polling, daha yuksek gecikme)
+
+# Asagidakiler sadece eski kamera/kumanda araclari icin (camera_node.py, rc_drive.py vb.); ana program kullanmaz.
+# numpy>=1.24.0
+# opencv-contrib-python>=4.8.0   (JetPack'in kendi cv2'si varsa kurmayin)

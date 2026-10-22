@@ -1,0 +1,20 @@
+# AVTECH AGV - kumanda ile surusu acilista baslatir (GUI'SIZ yedek mod).
+# Normalde avtech-brain.service kullanin (GUI + kumanda). Ikisi ayni anda calismaz.
+# Kurulum:  sudo cp avtech-rc.service /etc/systemd/system/ && sudo systemctl enable --now avtech-rc
+# Log:      journalctl -u avtech-rc -f
+# __USER__ ve __DIR__ deploy sirasinda doldurulur.
+[Unit]
+Description=AVTECH AGV RC manuel surus
+After=multi-user.target
+Conflicts=avtech-brain.service
+
+[Service]
+User=__USER__
+SupplementaryGroups=dialout
+WorkingDirectory=__DIR__
+ExecStart=/usr/bin/python3 -u __DIR__/rc_drive.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

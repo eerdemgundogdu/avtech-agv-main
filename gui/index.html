@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>AVTECH AGV — Manuel Kontrol</title>
+    <!-- Yerel dosya: Jetson'a bağlanan bilgisayarın interneti olmasa da çalışır -->
+    <script src="socket.io.min.js"></script>
+    <style>
+        :root {
+            --bg: #06080d;
+            --panel: #0d121c;
+            --panel-2: #121a28;
+            --line: rgba(0, 220, 255, 0.14);
+            --line-strong: rgba(0, 220, 255, 0.4);
+            --cyan: #00dcff;
+            --green: #00ff7f;
+            --red: #ff3860;
+            --orange: #ffaa00;
+            --purple: #a855f7;
+            --text: #e8edf5;
+            --muted: #7a89a3;
+            --dim: #3d4b62;
+            --mono: Consolas, "JetBrains Mono", "DejaVu Sans Mono", monospace;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; }
+        body {
+            background: var(--bg);
+            background-image: radial-gradient(ellipse at 15% 30%, rgba(0, 220, 255, 0.05) 0%, transparent 55%),
+                              radial-gradient(ellipse at 85% 80%, rgba(0, 255, 127, 0.03) 0%, transparent 55%);
+            color: var(--text);
+            font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+            display: flex; flex-direction: column;
+            user-select: none; -webkit-user-select: none;
+            overflow-x: hidden;
+        }
+        button { font-family: inherit; }
+        .mono { font-family: var(--mono); }
+
+        /* ── Header ── */
+        header {
+            display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+            padding: 10px 16px; margin: 8px 8px 0;
+            background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+        }
+        .brand { display: flex; align-items: center; gap: 10px; margin-right: auto; }
+        .brand-icon {
+            width: 36px; height: 36px; border-radius: 8px;
+            background: linear-gradient(135deg, var(--cyan), var(--green));
+            color: #000; font-weight: 900; font-size: 18px;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .brand h1 { font-size: 16px; letter-spacing: 2px; font-weight: 800; }
+        .brand .sub { font-size: 10px; color: var(--cyan); letter-spacing: 1.5px; }
+        .chip { display: flex; flex-direction: column; align-items: flex-start; min-width: 64px; }
+        .chip .k { font-size: 9px; color: var(--muted); letter-spacing: 1.2px; font-weight: 700; }
+        .chip .v { font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+        .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); box-shadow: 0 0 6px var(--red); flex: none; }
+        .dot.on { background: var(--green); box-shadow: 0 0 6px var(--green); }
+        .dot.warn { background: var(--orange); box-shadow: 0 0 6px var(--orange); }
+        .c-green { color: var(--green); } .c-red { color: var(--red); } .c-orange { color: var(--orange); } .c-cyan { color: var(--cyan); } .c-muted { color: var(--muted); }
+
+        .btn-stop {
+            background: rgba(255, 56, 96, 0.15); border: 2px solid var(--red); color: #fff;
+            font-size: 16px; font-weight: 900; letter-spacing: 2px;
+            padding: 10px 22px; border-radius: 10px; cursor: pointer;
+            box-shadow: 0 0 18px rgba(255, 56, 96, 0.25);
+        }
+        .btn-stop:hover { background: var(--red); }
+        .btn-stop:active { transform: scale(0.97); }
+        .btn-stop small { display: block; font-size: 9px; letter-spacing: 1px; font-weight: 600; opacity: 0.8; }
+
+        /* ── Banner ── */
+        .banner {
+            display: none; margin: 8px 8px 0; padding: 10px 14px; border-radius: 10px;
+            font-weight: 800; letter-spacing: 1px; text-align: center; font-size: 14px;
+        }
+        .banner.show { display: block; }
+        .banner.red { background: rgba(255, 56, 96, 0.15); border: 1px solid var(--red); color: var(--red); }
+        .banner.orange { background: rgba(255, 170, 0, 0.12); border: 1px solid var(--orange); color: var(--orange); }
+
+        /* ── Layout ── */
+        main {
+            flex: 1; display: grid; gap: 8px; padding: 8px;
+            grid-template-columns: minmax(320px, 1.05fr) minmax(320px, 1fr) minmax(280px, 0.8fr);
+        }
+        .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; display: flex; flex-direction: column; min-width: 0; }
+        .card-title {
+            padding: 10px 14px; font-size: 11px; font-weight: 800; letter-spacing: 1.5px; color: var(--cyan);
+            border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center;
+        }
+        .card-title .tag { font-size: 9px; padding: 2px 8px; border-radius: 20px; border: 1px solid var(--line-strong); color: var(--cyan); font-weight: 700; }
+        .card-body { padding: 14px; display: flex; flex-direction: column; gap: 14px; flex: 1; }
+
+        /* ── Hız modu ── */
+        .modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+        .mode-btn {
+            background: var(--panel-2); border: 1px solid var(--line); color: var(--muted);
+            border-radius: 10px; padding: 10px 6px; cursor: pointer; text-align: center;
+            transition: all 0.15s;
+        }
+        .mode-btn b { display: block; font-size: 15px; letter-spacing: 1px; color: var(--text); }
+        .mode-btn span { font-size: 10px; font-family: var(--mono); }
+        .mode-btn kbd { font-size: 9px; }
+        .mode-btn.active { border-color: var(--cyan); background: rgba(0, 220, 255, 0.12); box-shadow: 0 0 14px rgba(0, 220, 255, 0.2); }
+        .mode-btn.active b { color: var(--cyan); }
+        .mode-btn[data-mode="hizli"].active { border-color: var(--orange); background: rgba(255, 170, 0, 0.12); box-shadow: 0 0 14px rgba(255, 170, 0, 0.2); }
+        .mode-btn[data-mode="hizli"].active b { color: var(--orange); }
+        .mode-btn[data-mode="yavas"].active { border-color: var(--green); background: rgba(0, 255, 127, 0.1); box-shadow: 0 0 14px rgba(0, 255, 127, 0.18); }
+        .mode-btn[data-mode="yavas"].active b { color: var(--green); }
+
+        /* ── Joystick ── */
+        .drive-area { display: flex; gap: 16px; align-items: center; justify-content: center; flex-wrap: wrap; }
+        .joy {
+            --size: 240px;
+            width: var(--size); height: var(--size); border-radius: 50%; position: relative; flex: none;
+            background:
+                radial-gradient(circle, rgba(0, 220, 255, 0.10) 0%, rgba(0, 220, 255, 0.02) 60%, transparent 61%),
+                linear-gradient(90deg, transparent calc(50% - 0.5px), rgba(0, 220, 255, 0.18) 50%, transparent calc(50% + 0.5px)),
+                linear-gradient(0deg, transparent calc(50% - 0.5px), rgba(0, 220, 255, 0.18) 50%, transparent calc(50% + 0.5px)),
+                var(--panel-2);
+            border: 2px solid var(--line-strong);
+            touch-action: none; cursor: grab;
+        }
+        .joy.active { cursor: grabbing; border-color: var(--cyan); box-shadow: 0 0 24px rgba(0, 220, 255, 0.25); }
+        .joy.locked { opacity: 0.4; cursor: not-allowed; }
+        .joy .lbl { position: absolute; font-size: 10px; font-weight: 800; color: var(--dim); letter-spacing: 1px; pointer-events: none; }
+        .joy .lbl.f { top: 8px; left: 50%; transform: translateX(-50%); }
+        .joy .lbl.b { bottom: 8px; left: 50%; transform: translateX(-50%); }
+        .joy .lbl.l { left: 10px; top: 50%; transform: translateY(-50%); }
+        .joy .lbl.r { right: 10px; top: 50%; transform: translateY(-50%); }
+        .joy .ring { position: absolute; inset: 25%; border-radius: 50%; border: 1px dashed rgba(0, 220, 255, 0.15); pointer-events: none; }
+        .knob {
+            position: absolute; width: 76px; height: 76px; left: 50%; top: 50%;
+            margin: -38px 0 0 -38px; border-radius: 50%; pointer-events: none;
+            background: radial-gradient(circle at 35% 30%, #5ff0ff, var(--cyan) 45%, #0090b0);
+            box-shadow: 0 0 20px rgba(0, 220, 255, 0.45), inset 0 -4px 10px rgba(0, 0, 0, 0.35);
+            transition: transform 0.12s ease-out;
+        }
+        .joy.active .knob { transition: none; }
+
+        .keys { display: grid; grid-template-columns: repeat(3, 46px); grid-template-rows: repeat(2, 46px); gap: 6px; }
+        .key {
+            border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel-2);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 18px; font-weight: 800; color: var(--muted); transition: all 0.08s;
+        }
+        .key.on { background: var(--cyan); color: #00121a; border-color: var(--cyan); box-shadow: 0 0 14px rgba(0, 220, 255, 0.5); }
+        .key.blank { visibility: hidden; }
+
+        .bars { display: grid; grid-template-columns: 82px 1fr 52px; gap: 7px 10px; align-items: center; font-size: 11px; color: var(--muted); }
+        .bar { height: 10px; background: rgba(255, 255, 255, 0.05); border-radius: 5px; position: relative; overflow: hidden; }
+        .bar::after { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--dim); }
+        .bar .fill { position: absolute; top: 0; bottom: 0; background: var(--cyan); border-radius: 5px; transition: left 0.1s, width 0.1s; }
+        .bar .fill.g { background: var(--green); }
+        .bar .fill.o { background: var(--orange); }
+        .bars .num { text-align: right; font-family: var(--mono); color: var(--text); }
+
+        .hint { font-size: 11px; color: var(--muted); line-height: 1.6; }
+        .hint kbd, kbd {
+            font-family: var(--mono); font-size: 10px; padding: 1px 5px; border-radius: 4px;
+            border: 1px solid var(--line-strong); background: var(--panel-2); color: var(--text);
+        }
+
+        /* ── Araç durumu ── */
+        .state-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+        .state-badge {
+            padding: 8px 16px; border-radius: 30px; font-weight: 900; letter-spacing: 1.5px; font-size: 14px;
+            border: 1px solid var(--muted); color: var(--muted); background: rgba(122, 137, 163, 0.1);
+        }
+        .state-badge.drive { border-color: var(--green); color: var(--green); background: rgba(0, 255, 127, 0.1); box-shadow: 0 0 16px rgba(0, 255, 127, 0.2); }
+        .state-badge.fork { border-color: var(--orange); color: var(--orange); background: rgba(255, 170, 0, 0.1); }
+        .state-badge.fault { border-color: var(--red); color: var(--red); background: rgba(255, 56, 96, 0.12); }
+        .compass-wrap { display: flex; gap: 16px; align-items: center; justify-content: center; flex-wrap: wrap; }
+        .compass { width: 200px; height: 200px; flex: none; }
+        .compass .veh { transition: transform 0.1s linear; transform-origin: 100px 100px; }
+        .compass .tgt { transform-origin: 100px 100px; }
+        .imu-side { display: flex; flex-direction: column; gap: 8px; min-width: 150px; }
+        .big-num { font-size: 30px; font-weight: 800; font-family: var(--mono); }
+        .big-num small { font-size: 13px; color: var(--muted); }
+        .pill { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 10px; font-weight: 800; letter-spacing: 1px; border: 1px solid var(--dim); color: var(--muted); }
+        .pill.on { border-color: var(--green); color: var(--green); background: rgba(0, 255, 127, 0.1); }
+        .pill.wait { border-color: var(--orange); color: var(--orange); }
+
+        .toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; font-weight: 600; }
+        .toggle .sw { width: 38px; height: 20px; border-radius: 10px; background: var(--dim); position: relative; transition: background 0.15s; flex: none; }
+        .toggle .sw::after { content: ''; position: absolute; width: 16px; height: 16px; border-radius: 50%; background: #fff; top: 2px; left: 2px; transition: left 0.15s; }
+        .toggle.on .sw { background: var(--green); }
+        .toggle.on .sw::after { left: 20px; }
+
+        .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .stat { background: var(--panel-2); border: 1px solid rgba(255, 255, 255, 0.04); border-radius: 8px; padding: 9px 11px; }
+        .stat .k { font-size: 9px; color: var(--muted); font-weight: 700; letter-spacing: 1px; }
+        .stat .v { font-size: 18px; font-weight: 800; font-family: var(--mono); margin-top: 2px; }
+        .stat .v small { font-size: 10px; color: var(--muted); font-weight: 400; }
+        .batt { height: 8px; background: rgba(255, 255, 255, 0.06); border-radius: 4px; overflow: hidden; margin-top: 6px; }
+        .batt div { height: 100%; width: 0; background: linear-gradient(90deg, var(--cyan), var(--green)); transition: width 0.5s; }
+
+        .btn {
+            background: var(--panel-2); border: 1px solid var(--line-strong); color: var(--cyan);
+            padding: 9px 10px; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer;
+            transition: background 0.12s; touch-action: none;
+        }
+        .btn:hover { background: rgba(0, 220, 255, 0.12); }
+        .btn:active, .btn.pressed { background: var(--cyan); color: #00121a; }
+        .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+        .btn.red { border-color: var(--red); color: var(--red); }
+        .btn.red:active, .btn.red.pressed { background: var(--red); color: #fff; }
+        .btn.green { border-color: var(--green); color: var(--green); }
+        .btn.green:active, .btn.green.pressed { background: var(--green); color: #00140a; }
+        .btn small { display: block; font-size: 9px; font-weight: 600; opacity: 0.75; margin-top: 2px; }
+        .row { display: flex; gap: 6px; }
+        .row > * { flex: 1; }
+
+        /* ── Forklift ── */
+        .fork-wrap { display: flex; gap: 14px; align-items: stretch; }
+        .fork-mast {
+            width: 64px; flex: none; min-height: 260px; position: relative;
+            border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel-2); overflow: hidden;
+        }
+        .fork-mast::before, .fork-mast::after { content: ''; position: absolute; top: 8px; bottom: 8px; width: 4px; background: rgba(0, 220, 255, 0.18); }
+        .fork-mast::before { left: 14px; } .fork-mast::after { right: 14px; }
+        .fork-carriage {
+            position: absolute; left: 6px; right: 6px; height: 22px; bottom: 6px;
+            background: linear-gradient(180deg, var(--orange), #c77f00); border-radius: 4px;
+            box-shadow: 0 0 12px rgba(255, 170, 0, 0.4); transition: bottom 0.12s linear;
+        }
+        .fork-carriage::after { content: ''; position: absolute; left: -2px; right: -16px; bottom: -4px; height: 4px; background: var(--orange); border-radius: 2px; }
+        .fork-side { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+        .fork-pct { font-size: 34px; font-weight: 800; font-family: var(--mono); }
+        .fork-btn-big { padding: 16px 10px; font-size: 15px; }
+        details { font-size: 11px; color: var(--muted); }
+        details summary { cursor: pointer; font-weight: 700; }
+
+        /* ── Log ── */
+        .log-card { margin: 0 8px 8px; }
+        .log {
+            height: 120px; overflow-y: auto; padding: 8px 12px; font-family: var(--mono); font-size: 11px; color: var(--muted);
+            user-select: text; -webkit-user-select: text;
+        }
+        .log .t { color: var(--dim); margin-right: 8px; }
+
+        @media (max-width: 1100px) {
+            main { grid-template-columns: 1fr 1fr; }
+            .col-fork { grid-column: 1 / -1; }
+        }
+        @media (max-width: 720px) {
+            main { grid-template-columns: 1fr; }
+            .joy { --size: 220px; }
+            header { gap: 10px; }
+            .btn-stop { width: 100%; }
+        }
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-thumb { background: rgba(0, 220, 255, 0.25); border-radius: 3px; }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="brand">
+        <div class="brand-icon">A</div>
+        <div>
+            <h1>AVTECH AGV</h1>
+            <div class="sub">MANUEL KONTROL İSTASYONU</div>
+        </div>
+    </div>
+    <div class="chip"><span class="k">SUNUCU</span><span class="v" id="chipServer"><span class="dot"></span>YOK</span></div>
+    <div class="chip"><span class="k">TEENSY</span><span class="v" id="chipTeensy"><span class="dot"></span>YOK</span></div>
+    <div class="chip"><span class="k">MOTOR</span><span class="v" id="chipMotor"><span class="dot"></span>—</span></div>
+    <div class="chip"><span class="k">IMU</span><span class="v" id="chipImu"><span class="dot"></span>—</span></div>
+    <div class="chip"><span class="k">BATARYA</span><span class="v" id="chipBat">—</span></div>
+    <div class="chip"><span class="k">GECİKME</span><span class="v mono" id="chipRtt">— ms</span></div>
+    <button class="btn-stop" id="btnStop">■ STOP<small>BOŞLUK / ESC</small></button>
+</header>
+
+<div class="banner red" id="bannerConn">SUNUCU BAĞLANTISI YOK — araç Jetson tarafından durduruldu</div>
+<div class="banner red" id="bannerTeensy">TEENSY VERİSİ GELMİYOR — USB kablosunu / Teensy gücünü kontrol edin</div>
+<div class="banner orange" id="bannerFork">Çatal hareket ediyor — sürüş çatal durana kadar kilitli</div>
+
+<main>
+    <!-- ═══ SÜRÜŞ ═══ -->
+    <section class="card">
+        <div class="card-title">SÜRÜŞ <span class="tag" id="tagDrive">HAZIR</span></div>
+        <div class="card-body">
+            <div class="modes" id="modes">
+                <button class="mode-btn" data-mode="yavas"><b>YAVAŞ</b><span>—</span> <kbd>1</kbd></button>
+                <button class="mode-btn" data-mode="orta"><b>ORTA</b><span>—</span> <kbd>2</kbd></button>
+                <button class="mode-btn" data-mode="hizli"><b>HIZLI</b><span>—</span> <kbd>3</kbd></button>
+            </div>
+
+            <div class="drive-area">
+                <div class="joy" id="joy">
+                    <div class="ring"></div>
+                    <span class="lbl f">İLERİ</span><span class="lbl b">GERİ</span>
+                    <span class="lbl l">SOL</span><span class="lbl r">SAĞ</span>
+                    <div class="knob" id="knob"></div>
+                </div>
+                <div class="keys">
+                    <div class="key blank"></div><div class="key" id="kW">W</div><div class="key blank"></div>
+                    <div class="key" id="kA">A</div><div class="key" id="kS">S</div><div class="key" id="kD">D</div>
+                </div>
+            </div>
+
+            <div class="bars">
+                <span>HIZ KOMUTU</span><div class="bar"><div class="fill g" id="barSpd"></div></div><span class="num" id="numSpd">0</span>
+                <span>DİREKSİYON</span><div class="bar"><div class="fill" id="barStr"></div></div><span class="num" id="numStr">0</span>
+            </div>
+
+            <div class="hint">
+                Joystick'i fareyle / parmakla sürükleyin, bırakınca araç durur.<br>
+                <kbd>W</kbd><kbd>S</kbd> ileri/geri · <kbd>A</kbd><kbd>D</kbd> yerinde dönüş (W/S ile birlikte: kavisli) · ok tuşları da çalışır<br>
+                <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> hız modu · <kbd>Boşluk</kbd>/<kbd>Esc</kbd> STOP
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══ ARAÇ DURUMU ═══ -->
+    <section class="card">
+        <div class="card-title">ARAÇ DURUMU <span class="tag mono" id="tagRaw">—</span></div>
+        <div class="card-body">
+            <div class="state-row">
+                <div class="state-badge" id="stateBadge">BAĞLANTI YOK</div>
+                <button class="btn" id="btnReset" title="Teensy FSM'ini IDLE'a al">↺ RESET</button>
+            </div>
+
+            <div class="compass-wrap">
+                <svg class="compass" viewBox="0 0 200 200" id="compass">
+                    <circle cx="100" cy="100" r="94" fill="#0a0f18" stroke="rgba(0,220,255,0.35)" stroke-width="2"/>
+                    <circle cx="100" cy="100" r="70" fill="none" stroke="rgba(0,220,255,0.08)" stroke-width="1"/>
+                    <g id="ticks"></g>
+                    <g class="tgt" id="tgtMark" style="display:none">
+                        <path d="M100 4 L108 18 L92 18 Z" fill="#00ff7f"/>
+                        <line x1="100" y1="18" x2="100" y2="42" stroke="#00ff7f" stroke-width="2" stroke-dasharray="3 3"/>
+                    </g>
+                    <g class="veh" id="veh">
+                        <rect x="82" y="72" width="36" height="56" rx="6" fill="rgba(0,220,255,0.15)" stroke="#00dcff" stroke-width="2"/>
+                        <rect x="76" y="80" width="6" height="16" rx="2" fill="#00dcff"/>
+                        <rect x="118" y="80" width="6" height="16" rx="2" fill="#00dcff"/>
+                        <rect x="76" y="104" width="6" height="16" rx="2" fill="#00dcff"/>
+                        <rect x="118" y="104" width="6" height="16" rx="2" fill="#00dcff"/>
+                        <path d="M100 48 L112 66 L88 66 Z" fill="#00dcff"/>
+                        <rect x="88" y="60" width="4" height="14" fill="#ffaa00"/>
+                        <rect x="108" y="60" width="4" height="14" fill="#ffaa00"/>
+                    </g>
+                </svg>
+                <div class="imu-side">
+                    <div><div class="stat k" style="padding:0;border:0;background:none">YAW</div><div class="big-num" id="yawVal">—<small>°</small></div></div>
+                    <div class="c-muted mono" style="font-size:12px">dönüş: <span id="gyroVal" style="color:var(--text)">—</span> °/s</div>
+                    <div>YÖN TUTMA: <span class="pill" id="holdPill">—</span></div>
+                    <div class="toggle" id="holdToggle"><div class="sw"></div><span>Düz gidişte yön tutma <kbd>H</kbd></span></div>
+                    <button class="btn" id="btnYawZero">⟲ Yaw'ı sıfırla</button>
+                </div>
+            </div>
+
+            <div class="bars">
+                <span>SOL TEKER</span><div class="bar"><div class="fill g" id="barL"></div></div><span class="num" id="numL">0</span>
+                <span>SAĞ TEKER</span><div class="bar"><div class="fill g" id="barR"></div></div><span class="num" id="numR">0</span>
+            </div>
+
+            <div class="grid2">
+                <div class="stat"><div class="k">BATARYA</div><div class="v" id="batVal">—<small>V</small></div><div class="batt"><div id="batFill"></div></div></div>
+                <div class="stat"><div class="k">KART SICAKLIĞI</div><div class="v" id="tempVal">—<small>°C</small></div></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══ FORKLIFT ═══ -->
+    <section class="card col-fork">
+        <div class="card-title">FORKLIFT (DM556) <span class="tag" id="tagFork">—</span></div>
+        <div class="card-body">
+            <div class="fork-wrap">
+                <div class="fork-mast"><div class="fork-carriage" id="forkCarriage"></div></div>
+                <div class="fork-side">
+                    <div><div class="fork-pct" id="forkPct">—%</div><div class="c-muted mono" style="font-size:11px" id="forkSteps">— / — adım</div></div>
+                    <button class="btn fork-btn-big" id="btnForkUpHold">▲ YUKARI<small>basılı tut · E</small></button>
+                    <button class="btn fork-btn-big" id="btnForkDownHold">▼ AŞAĞI<small>basılı tut · Q</small></button>
+                    <div class="row">
+                        <button class="btn green" id="btnForkTop">⏫ TAM YUKARI<small>T</small></button>
+                        <button class="btn green" id="btnForkBottom">⏬ TAM AŞAĞI<small>G</small></button>
+                    </div>
+                    <button class="btn red" id="btnForkStop">■ ÇATAL DUR<small>X</small></button>
+                </div>
+            </div>
+            <details>
+                <summary>Kalibrasyon</summary>
+                <div class="row" style="margin-top:8px">
+                    <button class="btn" id="btnJogDownFree">▼ limitsiz 50</button>
+                    <button class="btn" id="btnJogUpFree">▲ limitsiz 50</button>
+                </div>
+                <button class="btn" id="btnForkZero" style="width:100%;margin-top:6px">⌂ Burası = alt (0)</button>
+                <div style="margin-top:6px;line-height:1.5">Açılışta çatal otomatik alta iner ve konum 0 olur. Konum kayarsa çatalı limitsiz adımlarla alt dayanağa indirip "Burası = alt" ile sıfırlayın.</div>
+            </details>
+        </div>
+    </section>
+</main>
+
+<section class="card log-card">
+    <div class="card-title">OLAY GÜNLÜĞÜ <span class="tag" id="tagMode">—</span></div>
+    <div class="log" id="log"></div>
+</section>
+
+<script>
+// ------------------------------------------------------------
+//  AVTECH AGV — Manuel Kontrol GUI
+//  GUI sadece -1..1 eksen değerleri gönderir; hız modu ve sınırlar Jetson'da.
+//  Sürerken 50 ms'de bir 'drive' gönderilir; bırakınca 'drive_release'.
+//  Paket 600 ms kesilirse Jetson aracı durdurur (sekme kapandı / Wi-Fi koptu).
+// ------------------------------------------------------------
+
+const SEND_MS = 50;              // Sürüş paketi periyodu
+const FORK_HOLD_MS = 100;        // Çatal basılı tut keepalive (Teensy 350 ms'de durur)
+const ARC_STEER = 0.55;          // W+A/D: ileri giderken direksiyon oranı (A/D tek başına = tam yerinde dönüş)
+const JOY_DZ_X = 0.12, JOY_DZ_Y = 0.06;   // Joystick ölü bölge (X geniş: düz gidiş kolay, yön tutma devreye girsin)
+const TELEMETRY_STALE_MS = 1000;
+const BAT_EMPTY_V = 19.8, BAT_FULL_V = 25.2;   // 6S Li-ion/LiPo: 3.3 V/hücre boş, 4.2 V/hücre dolu
+
+const $ = (id) => document.getElementById(id);
+const socket = io({ reconnection: true, reconnectionDelay: 500, reconnectionDelayMax: 2000, transports: ['websocket', 'polling'] });
+
+let serverOk = false;
+let lastTlm = 0;
+let tlm = null;
+let modes = null;
+let curMode = null;
+let holdEnabled = true;
+
+// ── Log ────────────────────────────────────────────────────────────────────
+const LOG_COLORS = { green: 'var(--green)', red: 'var(--red)', cyan: 'var(--cyan)', orange: 'var(--orange)', muted: 'var(--muted)' };
+function addLog(msg, level) {
+    const box = $('log');
+    const line = document.createElement('div');
+    const t = document.createElement('span');
+    t.className = 't'; t.textContent = new Date().toTimeString().slice(0, 8);
+    const m = document.createElement('span');
+    m.style.color = LOG_COLORS[level] || 'var(--text)';
+    m.textContent = msg;
+    line.append(t, m);
+    const stick = box.scrollTop + box.clientHeight >= box.scrollHeight - 4;
+    box.appendChild(line);
+    while (box.children.length > 300) box.removeChild(box.firstChild);
+    if (stick) box.scrollTop = box.scrollHeight;
+}
+
+function setChip(id, cls, text) {
+    const el = $(id);
+    el.innerHTML = '';
+    if (cls !== null) { const d = document.createElement('span'); d.className = 'dot ' + cls; el.appendChild(d); }
+    el.appendChild(document.createTextNode(text));
+}
+
+function setBar(id, v) {   // v: -1..1, merkezden
+    const el = $(id);
+    v = Math.max(-1, Math.min(1, v || 0));
+    if (v >= 0) { el.style.left = '50%'; el.style.width = (v * 50) + '%'; }
+    else { el.style.left = (50 + v * 50) + '%'; el.style.width = (-v * 50) + '%'; }
+}
+
+// ── Socket ─────────────────────────────────────────────────────────────────
+socket.on('connect', () => {
+    serverOk = true;
+    setChip('chipServer', 'on', 'BAĞLI');
+    $('bannerConn').classList.remove('show');
+    addLog('Sunucuya bağlanıldı', 'green');
+});
+socket.on('disconnect', () => {
+    serverOk = false;
+    releaseAll(false);
+    setChip('chipServer', '', 'YOK');
+    $('bannerConn').classList.add('show');
+    addLog('Sunucu bağlantısı kesildi — yeniden bağlanılıyor…', 'red');
+});
+socket.on('config', (c) => {
+    modes = c.modes;
+    document.querySelectorAll('.mode-btn').forEach((b) => {
+        const m = modes[b.dataset.mode];
+        if (m) b.querySelector('span').textContent = `hız ${m.speed} · dön ${m.steer}`;
+    });
+    applyMode(c.mode);
+});
+socket.on('mode', (d) => applyMode(d.mode));
+socket.on('system_status', (st) => {
+    const t = st.teensy || {};
+    if (t.connected) setChip('chipTeensy', 'on', 'BAĞLI');
+    else if (t.port_open) setChip('chipTeensy', 'warn', 'VERİ YOK');
+    else setChip('chipTeensy', '', 'YOK');
+    if (st.mode && st.mode !== curMode) applyMode(st.mode);
+});
+socket.on('telemetry', (d) => { lastTlm = Date.now(); tlm = d; renderTelemetry(d); });
+socket.on('log', (d) => addLog(d.msg, d.level));
+socket.on('teensy_event', (ev) => {
+    if (ev.resp === 'pong') addLog('Teensy: pong', 'cyan');
+});
+
+// Gecikme ölçümü (gidiş-dönüş)
+setInterval(() => {
+    if (!serverOk) { $('chipRtt').textContent = '— ms'; return; }
+    const t0 = performance.now();
+    socket.timeout(2000).emit('ping_rt', (err) => {
+        const el = $('chipRtt');
+        if (err) { el.textContent = '>2000 ms'; el.className = 'v mono c-red'; return; }
+        const ms = Math.round(performance.now() - t0);
+        el.textContent = ms + ' ms';
+        el.className = 'v mono ' + (ms < 80 ? 'c-green' : ms < 200 ? 'c-orange' : 'c-red');
+    });
+}, 1000);
+
+// Teensy verisi bayatladı mı
+setInterval(() => {
+    const stale = serverOk && Date.now() - lastTlm > TELEMETRY_STALE_MS;
+    $('bannerTeensy').classList.toggle('show', stale);
+    if (stale || !serverOk) {
+        const b = $('stateBadge');
+        b.textContent = serverOk ? 'TEENSY YOK' : 'BAĞLANTI YOK';
+        b.className = 'state-badge fault';
+        $('bannerFork').classList.remove('show');
+    }
+}, 250);
+
+// ── Hız modu ───────────────────────────────────────────────────────────────
+function applyMode(m) {
+    if (!m) return;
+    curMode = m;
+    document.querySelectorAll('.mode-btn').forEach((b) => b.classList.toggle('active', b.dataset.mode === m));
+    const lbl = modes && modes[m] ? modes[m].label : m.toUpperCase();
+    $('tagMode').textContent = 'MOD: ' + lbl;
+}
+function setMode(m) {
+    if (!serverOk) return;
+    socket.emit('set_mode', { mode: m });
+}
+document.querySelectorAll('.mode-btn').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
+
+// ── Telemetri ──────────────────────────────────────────────────────────────
+const STATE_TEXT = { IDLE: 'BEKLEMEDE', MANUAL: 'MANUEL SÜRÜŞ', PICKUP: 'ÇATAL YUKARI', DROP: 'ÇATAL AŞAĞI', FAULT: 'HATA' };
+const FORK_TEXT = { DOWN: 'ALTTA', UP: 'ÜSTTE', MID: 'ARADA', MOVING_UP: 'YÜKSELİYOR', MOVING_DOWN: 'İNİYOR' };
+const HOLD_TEXT = ['BEKLEMEDE', 'KİLİTLENİYOR', 'AKTİF'];
+
+function renderTelemetry(d) {
+    // Durum
+    const st = d.state || '—';
+    const b = $('stateBadge');
+    b.textContent = STATE_TEXT[st] || st;
+    b.className = 'state-badge' + (st === 'MANUAL' ? ' drive' : (st === 'PICKUP' || st === 'DROP') ? ' fork' : st === 'FAULT' ? ' fault' : '');
+    $('tagRaw').textContent = st + (d.fault ? ' · ' + d.fault : '');
+    const forkBusy = st === 'PICKUP' || st === 'DROP';
+    $('bannerFork').classList.toggle('show', forkBusy && driving());
+
+    // Motorlar
+    const mL = !!d.motL, mR = !!d.motR;
+    if (mL || mR) setChip('chipMotor', 'on', 'OK');
+    else setChip('chipMotor', '', 'BAĞLI DEĞİL');
+
+    // Komut + ölçülen hız
+    const cmdSpd = d.cmdSpd || 0, cmdStr = d.cmdStr || 0;
+    const ref = modes && curMode && modes[curMode] ? modes[curMode] : { speed: 400, steer: 250 };
+    setBar('barSpd', cmdSpd / ref.speed); $('numSpd').textContent = cmdSpd;
+    setBar('barStr', cmdStr / ref.steer); $('numStr').textContent = cmdStr;
+    const sL = d.spdL || 0, sR = d.spdR || 0;
+    setBar('barL', sL / 300); $('numL').textContent = sL;
+    setBar('barR', sR / 300); $('numR').textContent = sR;
+
+    // IMU
+    const imuOk = !!d.imu;
+    setChip('chipImu', imuOk ? 'on' : '', imuOk ? 'OK' : 'HATA');
+    const yaw = Number(d.yaw) || 0;
+    $('yawVal').innerHTML = imuOk ? `${yaw.toFixed(1)}<small>°</small>` : '—<small>°</small>';
+    $('gyroVal').textContent = (Number(d.gyroZ) || 0).toFixed(1);
+    // Yaw sola dönüşte artar → simge ekranda saat yönünün tersine döner
+    $('veh').setAttribute('transform', `rotate(${-yaw} 100 100)`);
+    holdEnabled = d.holdEn !== false;
+    $('holdToggle').classList.toggle('on', holdEnabled);
+    const hs = d.hold || 0;
+    const pill = $('holdPill');
+    if (!imuOk) { pill.textContent = 'IMU YOK'; pill.className = 'pill'; }
+    else if (!holdEnabled) { pill.textContent = 'KAPALI'; pill.className = 'pill'; }
+    else { pill.textContent = HOLD_TEXT[hs] || '—'; pill.className = 'pill' + (hs === 2 ? ' on' : hs === 1 ? ' wait' : ''); }
+    const tm = $('tgtMark');
+    if (hs === 2 && imuOk) { tm.style.display = ''; tm.setAttribute('transform', `rotate(${-(Number(d.tgtYaw) || 0)} 100 100)`); }
+    else tm.style.display = 'none';
+
+    // Batarya / sıcaklık
+    const bat = Number(d.bat) || 0;
+    if (bat > 1) {
+        const pct = Math.max(0, Math.min(100, (bat - BAT_EMPTY_V) / (BAT_FULL_V - BAT_EMPTY_V) * 100));
+        $('batVal').innerHTML = `${bat.toFixed(1)}<small>V</small>`;
+        $('batFill').style.width = pct + '%';
+        $('batFill').style.background = pct < 20 ? 'var(--red)' : '';
+        $('chipBat').textContent = bat.toFixed(1) + ' V';
+        $('chipBat').className = 'v ' + (pct < 20 ? 'c-red' : 'c-green');
+    } else {
+        $('batVal').innerHTML = '—<small>V</small>'; $('batFill').style.width = '0';
+        $('chipBat').textContent = '—'; $('chipBat').className = 'v';
+    }
+    const temps = [d.tempL, d.tempR].map(Number).filter((v) => v > 0);
+    $('tempVal').innerHTML = temps.length ? `${Math.max(...temps).toFixed(1)}<small>°C</small>` : '—<small>°C</small>';
+
+    // Forklift
+    if (d.fork !== undefined) {
+        const top = d.forkTop || 1;
+        const pct = Math.max(0, Math.min(100, d.fork / top * 100));
+        $('forkPct').textContent = pct.toFixed(0) + '%';
+        $('forkSteps').textContent = `${d.fork} / ${top} adım`;
+        $('forkCarriage').style.bottom = `calc(6px + ${pct / 100} * (100% - 34px))`;
+        $('tagFork').textContent = FORK_TEXT[d.forkSt] || d.forkSt || '—';
+    }
+
+    $('tagDrive').textContent = driving() ? 'SÜRÜLÜYOR' : 'HAZIR';
+}
+
+// ── Sürüş girdisi (joystick + klavye) ──────────────────────────────────────
+const keys = { f: false, b: false, l: false, r: false };
+const KEYMAP = { w: 'f', arrowup: 'f', s: 'b', arrowdown: 'b', a: 'l', arrowleft: 'l', d: 'r', arrowright: 'r' };
+const KEY_EL = { f: 'kW', b: 'kS', l: 'kA', r: 'kD' };
+let joy = { active: false, x: 0, y: 0, pid: null };
+let wasDriving = false;
+
+function shape(v, dz) {   // Ölü bölge + yumuşak eğri: merkez yakınında hassas kontrol
+    const a = Math.abs(v);
+    if (a < dz) return 0;
+    const n = (a - dz) / (1 - dz);
+    return Math.sign(v) * n * (0.35 + 0.65 * n);
+}
+
+function currentAxes() {
+    if (joy.active) return { x: shape(joy.x, JOY_DZ_X), y: shape(joy.y, JOY_DZ_Y) };
+    const y = (keys.f ? 1 : 0) - (keys.b ? 1 : 0);
+    let x = (keys.r ? 1 : 0) - (keys.l ? 1 : 0);
+    if (y !== 0) x *= ARC_STEER;
+    return { x, y };
+}
+function driving() { const a = currentAxes(); return a.x !== 0 || a.y !== 0; }
+
+function driveTick() {
+    if (!serverOk) return;
+    const a = currentAxes();
+    if (a.x !== 0 || a.y !== 0) {
+        socket.emit('drive', { x: +a.x.toFixed(3), y: +a.y.toFixed(3) });
+        wasDriving = true;
+    } else if (wasDriving) {
+        socket.emit('drive_release');
+        wasDriving = false;
+    }
+}
+setInterval(driveTick, SEND_MS);
+
+function renderKeys() {
+    for (const k in KEY_EL) $(KEY_EL[k]).classList.toggle('on', keys[k]);
+}
+
+function releaseAll(notify = true) {
+    for (const k in keys) keys[k] = false;
+    renderKeys();
+    joyRelease();
+    forkHoldStop();
+    if (notify && serverOk && wasDriving) socket.emit('drive_release');
+    wasDriving = false;
+}
+
+// Joystick (Pointer Events: fare + dokunmatik + kalem)
+const joyEl = $('joy'), knobEl = $('knob');
+function joyMove(e) {
+    const r = joyEl.getBoundingClientRect();
+    const R = r.width / 2 - 38;           // Topuz kenarda kalsın
+    let dx = e.clientX - (r.left + r.width / 2);
+    let dy = e.clientY - (r.top + r.height / 2);
+    const dist = Math.hypot(dx, dy);
+    if (dist > R) { dx = dx / dist * R; dy = dy / dist * R; }
+    knobEl.style.transform = `translate(${dx}px, ${dy}px)`;
+    joy.x = dx / R;
+    joy.y = -dy / R;
+}
+function joyRelease() {
+    if (!joy.active) return;
+    joy.active = false; joy.x = 0; joy.y = 0;
+    joyEl.classList.remove('active');
+    knobEl.style.transform = 'translate(0px, 0px)';
+    if (joy.pid !== null) { try { joyEl.releasePointerCapture(joy.pid); } catch (_) {} }
+    joy.pid = null;
+    driveTick();
+}
+joyEl.addEventListener('pointerdown', (e) => {
+    if (!serverOk) return;
+    e.preventDefault();
+    joy.active = true; joy.pid = e.pointerId;
+    joyEl.setPointerCapture(e.pointerId);
+    joyEl.classList.add('active');
+    joyMove(e);
+    driveTick();
+});
+joyEl.addEventListener('pointermove', (e) => { if (joy.active && e.pointerId === joy.pid) joyMove(e); });
+['pointerup', 'pointercancel', 'lostpointercapture'].forEach((ev) =>
+    joyEl.addEventListener(ev, (e) => { if (e.pointerId === joy.pid) joyRelease(); }));
+joyEl.addEventListener('contextmenu', (e) => e.preventDefault());
+
+// ── Forklift ───────────────────────────────────────────────────────────────
+let forkHoldDir = 0, forkHoldTimer = null, forkHoldBtn = null;
+function forkSend(payload) { if (serverOk) socket.emit('fork', payload); }
+function forkHoldStart(dir, btn) {
+    if (!serverOk || forkHoldDir === dir) return;
+    forkHoldStop(false);
+    forkHoldDir = dir; forkHoldBtn = btn || null;
+    if (forkHoldBtn) forkHoldBtn.classList.add('pressed');
+    forkSend({ action: 'hold', dir });
+    forkHoldTimer = setInterval(() => forkSend({ action: 'hold', dir }), FORK_HOLD_MS);
+}
+function forkHoldStop(send = true) {
+    if (forkHoldTimer) { clearInterval(forkHoldTimer); forkHoldTimer = null; }
+    if (forkHoldBtn) { forkHoldBtn.classList.remove('pressed'); forkHoldBtn = null; }
+    if (forkHoldDir !== 0) {
+        forkHoldDir = 0;
+        if (send) forkSend({ action: 'stop' });
+    }
+}
+function bindHold(id, dir) {
+    const el = $(id);
+    el.addEventListener('pointerdown', (e) => { e.preventDefault(); el.setPointerCapture(e.pointerId); forkHoldStart(dir, el); });
+    ['pointerup', 'pointercancel', 'lostpointercapture'].forEach((ev) => el.addEventListener(ev, () => { if (forkHoldBtn === el) forkHoldStop(); }));
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+bindHold('btnForkUpHold', 1);
+bindHold('btnForkDownHold', -1);
+$('btnForkTop').addEventListener('click', () => { forkSend({ action: 'up' }); addLog('Çatal: TAM YUKARI', 'cyan'); });
+$('btnForkBottom').addEventListener('click', () => { forkSend({ action: 'down' }); addLog('Çatal: TAM AŞAĞI', 'cyan'); });
+$('btnForkStop').addEventListener('click', () => { forkHoldStop(false); forkSend({ action: 'stop' }); addLog('Çatal: DUR', 'red'); });
+$('btnJogUpFree').addEventListener('click', () => forkSend({ action: 'jog', steps: 50, nolimit: 1 }));
+$('btnJogDownFree').addEventListener('click', () => forkSend({ action: 'jog', steps: -50, nolimit: 1 }));
+$('btnForkZero').addEventListener('click', () => {
+    if (confirm('Çatal şu an en altta mı? Mevcut konum 0 (alt) olarak kaydedilecek.')) {
+        forkSend({ action: 'zero' }); addLog('Çatal konumu sıfırlandı (alt = 0)', 'cyan');
+    }
+});
+
+// ── Diğer butonlar ─────────────────────────────────────────────────────────
+function doStop() {
+    releaseAll(false);
+    if (serverOk) socket.emit('stop');
+    addLog('STOP', 'red');
+}
+$('btnStop').addEventListener('click', doStop);
+$('btnReset').addEventListener('click', () => { releaseAll(); if (serverOk) socket.emit('reset'); });
+function toggleHold() { if (serverOk) socket.emit('hold_enable', { on: !holdEnabled }); }
+$('holdToggle').addEventListener('click', toggleHold);
+$('btnYawZero').addEventListener('click', () => { if (serverOk) socket.emit('sync_yaw', { yaw: 0 }); });
+
+// ── Klavye ─────────────────────────────────────────────────────────────────
+function typing(e) {
+    const t = e.target;
+    return t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+}
+document.addEventListener('keydown', (e) => {
+    if (typing(e) || e.ctrlKey || e.metaKey || e.altKey) return;
+    const k = e.key.toLowerCase();
+    if (k === ' ' || k === 'escape') { e.preventDefault(); doStop(); return; }
+    const dk = KEYMAP[k];
+    if (dk) {
+        e.preventDefault();
+        if (!keys[dk]) { keys[dk] = true; renderKeys(); driveTick(); }
+        return;
+    }
+    if (e.repeat) return;
+    if (k === '1') setMode('yavas');
+    else if (k === '2') setMode('orta');
+    else if (k === '3') setMode('hizli');
+    else if (k === 'e') forkHoldStart(1, $('btnForkUpHold'));
+    else if (k === 'q') forkHoldStart(-1, $('btnForkDownHold'));
+    else if (k === 't') $('btnForkTop').click();
+    else if (k === 'g') $('btnForkBottom').click();
+    else if (k === 'x') $('btnForkStop').click();
+    else if (k === 'h') toggleHold();
+});
+document.addEventListener('keyup', (e) => {
+    const k = e.key.toLowerCase();
+    const dk = KEYMAP[k];
+    if (dk) { keys[dk] = false; renderKeys(); driveTick(); return; }
+    if ((k === 'e' && forkHoldDir === 1) || (k === 'q' && forkHoldDir === -1)) forkHoldStop();
+});
+// Pencere odağı kaybolursa (Alt+Tab, başka sekme) tuşların "keyup"ı gelmez → her şeyi bırak
+window.addEventListener('blur', () => releaseAll());
+document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAll(); });
+window.addEventListener('pagehide', () => releaseAll());
+
+// ── Pusula çizgileri ───────────────────────────────────────────────────────
+(function drawTicks() {
+    const g = $('ticks');
+    for (let a = 0; a < 360; a += 15) {
+        const major = a % 90 === 0;
+        const r1 = major ? 80 : 86, r2 = 92;
+        const rad = (a - 90) * Math.PI / 180;
+        const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        l.setAttribute('x1', 100 + r1 * Math.cos(rad)); l.setAttribute('y1', 100 + r1 * Math.sin(rad));
+        l.setAttribute('x2', 100 + r2 * Math.cos(rad)); l.setAttribute('y2', 100 + r2 * Math.sin(rad));
+        l.setAttribute('stroke', major ? 'rgba(0,220,255,0.7)' : 'rgba(0,220,255,0.25)');
+        l.setAttribute('stroke-width', major ? 2 : 1);
+        g.appendChild(l);
+    }
+})();
+
+addLog('AVTECH AGV manuel kontrol arayüzü yüklendi', 'cyan');
+</script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+# AVTECH AGV - GUI manuel kontrol sunucusu (avtech_brain.py) acilista baslar.
+# Kurulum: ./install_jetson.sh  (veya elle: __USER__/__DIR__ doldurup /etc/systemd/system/'e kopyalayin)
+# Log:     journalctl -u avtech-brain -f
+# avtech-rc.service (GUI'siz yedek) ile ayni anda calismaz.
+[Unit]
+Description=AVTECH AGV GUI manuel kontrol sunucusu
+After=network-online.target
+Wants=network-online.target
+Conflicts=avtech-rc.service
+
+[Service]
+User=__USER__
+SupplementaryGroups=dialout
+WorkingDirectory=__DIR__
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONIOENCODING=utf-8
+ExecStart=/usr/bin/python3 -u __DIR__/avtech_brain.py
+Restart=always
+RestartSec=2
+KillSignal=SIGTERM
+TimeoutStopSec=5
+
+[Install]
+WantedBy=multi-user.target
