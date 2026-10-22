@@ -3,13 +3,17 @@
 #  AVTECH AGV — Sensor Fusion Modülü
 #  IMU + Odometri + Kamera + QR Landmark kaynaştırma
 #
-#  Complementary Filter ile heading, odometri ile pozisyon tahmini,
-#  QR kod landmark'lar ile drift düzeltmesi.
+#  Varsayilan: EKF (ekf_localization.py) - odometri + gyro tahmini,
+#  odometri acisal hizi ile gyro bias kestirimi, QR landmark ile
+#  mesafe/aci guncellemesi.
+#  use_ekf=False: eski complementary filter yolu.
 # ============================================================================
 
 import math
 import time
 import numpy as np
+
+from ekf_localization import EkfLocalization
 
 
 class RobotState:
@@ -66,7 +70,8 @@ class SensorFusion:
     4. Kamera çizgi — yol sapması bilgisi
     """
 
-    def __init__(self, wheel_base_m=0.45, wheel_diameter_m=0.165):
+    def __init__(self, wheel_base_m=0.45, wheel_diameter_m=0.165,
+                 use_ekf=True):
         """
         Args:
             wheel_base_m: Tekerlekler arası mesafe (metre)
@@ -78,6 +83,9 @@ class SensorFusion:
 
         # Robot durumu
         self.state = RobotState()
+
+        self.use_ekf = use_ekf
+        self.ekf = EkfLocalization() if use_ekf else None
 
         # Complementary filter katsayıları
         # Yüksek alpha → IMU'ya güven (kısa vadeli doğru)
@@ -107,7 +115,7 @@ class SensorFusion:
         print("[FUSION] Sensor fusion initialized")
         print(f"[FUSION]   Wheel base: {wheel_base_m:.3f}m")
         print(f"[FUSION]   Wheel circumference: {self.wheel_circumference:.4f}m")
-        print(f"[FUSION]   Alpha heading: {self.alpha_heading}")
+        print(f"[FUSION]   Mode: {'EKF' if use_ekf else 'complementary'}")
 
     def register_qr_landmark(self, qr_id, x, y):
         """QR kod landmark pozisyonunu kaydet.
@@ -164,6 +172,39 @@ class SensorFusion:
         while self._last_odom_heading < 0.0:
             self._last_odom_heading += 360.0
 
+        if self.use_ekf:
+            self._update_ekf(dt, v_linear, v_angular_rad, gyro_z, qr_result)
+        else:
+            self._update_complementary(dt, imu_yaw, v_linear, qr_result)
+
+        self._update_aux(telemetry, qr_result, camera_line)
+        return self.state
+
+    def _update_ekf(self, dt, v_linear, odom_rate, gyro_z_dps, qr_result):
+        gyro = math.radians(gyro_z_dps)
+        self.ekf.predict(v_linear, gyro, dt)
+        self.ekf.update_odom_rate(odom_rate, gyro)
+
+        if qr_result and qr_result.get('detected', False):
+            qr_id = qr_result['data']
+            dist = qr_result.get('distance_m', 0)
+            if qr_id in self.qr_landmarks and dist > 0.05:
+                lm_x, lm_y = self.qr_landmarks[qr_id]
+                ok = self.ekf.update_landmark(
+                    lm_x, lm_y, dist,
+                    math.radians(qr_result.get('angle_deg', 0)))
+                if not ok:
+                    print(f"[FUSION] QR '{qr_id}' rejected by EKF gate")
+
+        px, py, th = self.ekf.pose
+        self.state.x = px
+        self.state.y = py
+        self.state.heading = math.degrees(th) % 360.0
+        self.state.vx = v_linear * math.cos(th)
+        self.state.vy = v_linear * math.sin(th)
+        self.state.speed = abs(v_linear)
+
+    def _update_complementary(self, dt, imu_yaw, v_linear, qr_result):
         # ── 3) Complementary Filter — Heading ──
         # IMU yaw doğrudan derece veriyor (BNO055 sensor fusion)
         # Odometri heading kümülatif hesaplama
@@ -208,10 +249,6 @@ class SensorFusion:
         # ── 5) QR Landmark Düzeltmesi ──
         if qr_result and qr_result.get('detected', False):
             qr_id = qr_result['data']
-            self.state.qr_id = qr_id
-            self.state.qr_distance = qr_result.get('distance_m', 0)
-            self.state.qr_angle = qr_result.get('angle_deg', 0)
-            self.state.qr_offset = qr_result.get('offset_x_cm', 0)
 
             # Bilinen landmark'sa pozisyon düzelt
             if qr_id in self.qr_landmarks:
@@ -233,7 +270,14 @@ class SensorFusion:
 
                     print(f"[FUSION] QR landmark correction: '{qr_id}' → "
                           f"Δx={self._position_offset_x:.3f}m, Δy={self._position_offset_y:.3f}m")
-        else:   
+
+    def _update_aux(self, telemetry, qr_result, camera_line):
+        if qr_result and qr_result.get('detected', False):
+            self.state.qr_id = qr_result['data']
+            self.state.qr_distance = qr_result.get('distance_m', 0)
+            self.state.qr_angle = qr_result.get('angle_deg', 0)
+            self.state.qr_offset = qr_result.get('offset_x_cm', 0)
+        else:
             self.state.qr_id = ''
 
         # ── 6) Çizgi Sensör Verileri ──
@@ -269,8 +313,6 @@ class SensorFusion:
         # Trajectory uzunluk limiti
         if len(self.trajectory) > 2000:
             self.trajectory = self.trajectory[-1000:]
-
-        return self.state
 
     def get_fused_line_offset(self):
         """IR + kamera çizgi sapmasını birleştir.
@@ -323,6 +365,8 @@ class SensorFusion:
         self._heading_offset = 0.0
         self._position_offset_x = 0.0
         self._position_offset_y = 0.0
+        if self.use_ekf:
+            self.ekf = EkfLocalization()
         print("[FUSION] State reset")
 
 

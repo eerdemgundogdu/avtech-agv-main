@@ -14,3 +14,5 @@ jobs:
         run: |
           pip install numpy
           cd jetson_software && python jetson_mapping_test.py
+      - name: EKF simulation test
+        run: cd jetson_software && python ekf_test.py

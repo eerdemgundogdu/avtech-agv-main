@@ -33,9 +33,11 @@ All pins, gains and timings are in `config.h`.
 - Autonomy modules, each runnable on its own:
   - `camera_node.py`: HSV color-line detection with a perspective (bird's-eye) transform and ArUco markers.
   - `qr_reader.py`: reads pick/drop task QR codes.
-  - `sensor_fusion.py`: fuses IMU heading with wheel odometry.
+  - `ekf_localization.py`: Extended Kalman Filter over `[x, y, θ, gyro_bias]`. Wheel odometry and gyro drive the prediction step. The wheel-derived yaw rate makes the gyro bias observable, and known QR landmarks give range/bearing updates, with a Mahalanobis gate that rejects outliers.
+  - `sensor_fusion.py`: wraps the EKF (default) or the older complementary filter (`use_ekf=False`) and adds line/obstacle state.
   - `mapping_node.py`: 2D occupancy grid built from odometry and ultrasonic sensors.
   - `mission_control.py`: task sequencing.
+- `ekf_test.py`: square-course simulation with a biased gyro. Final position error is ~0.06 m with the EKF versus ~0.54 m with dead reckoning, and the gyro bias estimate converges.
 - Tools: `calibrate_camera.py` (checkerboard calibration) and `jetson_hsv_tuner.py` (live threshold tuning).
 
 ## Running
