@@ -9,7 +9,10 @@ jobs:
   kicad:
     # Tasiyici kart: KiCad 9 ile ERC ve sematik paritesi dahil DRC.
     runs-on: ubuntu-latest
-    container: kicad/kicad:9.0
+    container:
+      image: kicad/kicad:9.0
+      # imaj varsayilan olarak 'kicad' kullanicisiyla calisir; checkout icin root gerekir
+      options: --user root
     defaults:
       run:
         working-directory: hardware/avtech-agv-carrier
