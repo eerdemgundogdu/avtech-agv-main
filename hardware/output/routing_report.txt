@@ -1,0 +1,3 @@
+634 iz parcasi, 381 via (263 tanesi GND dikis via)
+basarisiz baglanti: 0
+baştan ince yonlendirilen dallar (net, ped, istenen genislik mm):

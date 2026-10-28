@@ -147,8 +147,28 @@
 
 // Guvenlik ve Uyari Donanimlari
 // E-Stop butonu basildiginda LOW olacak (INPUT_PULLUP)
-#define ESTOP_PIN               36        // Acil durdurma butonu (INPUT_PULLUP)
+#define ESTOP_PIN               36        // Acil durdurma algilama girisi
+
+// Tasiyici kart (hardware/ klasoru). 0 = kartsiz mevcut kablolama, 1 = Rev A kart.
+// PlatformIO'da `pio run -e teensy41_carrier` bunu 1 ile derler.
+#ifndef CARRIER_BOARD_REV
+#define CARRIER_BOARD_REV       0
+#endif
+
+#if CARRIER_BOARD_REV >= 1
+// Kartta E-stop dongusu: +24V -> NC buton -> kontaktor bobini. Buton basilinca
+// bobin yazilimdan bagimsiz duser. Pin 36, 47k/10k bolucu + 3.3V zener ile
+// donguyu okur: normal = HIGH, basili = LOW. Harici bolucu oldugu icin
+// dahili pull-up KULLANILMAZ.
+#define ESTOP_ENABLED           1
+#define ESTOP_PIN_MODE          INPUT
+// Q5 (BCP56) -> kontaktor bobini. HIGH = motor gucu acik. Teensy resetteyken
+// pin yuksek empedansli kalir ve 10k pull-down bobini birakir.
+#define MOTOR_EN_PIN            38
+#else
 #define ESTOP_ENABLED           0         // 0 = buton bagli degil, pin yok sayilir. Buton takilinca 1 yapin.
+#define ESTOP_PIN_MODE          INPUT_PULLUP
+#endif
 #define BUZZER_PIN              37        // Uyarı buzzer
 #define STATUS_LED_PIN          2         // Durum LED'i (Pin 13 artık SPI SCK!)
 #define WATCHDOG_TIMEOUT_MS     2000      // Motor komutu yoksa dur

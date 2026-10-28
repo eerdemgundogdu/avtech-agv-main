@@ -42,6 +42,14 @@ All pins, gains and timings are in `config.h`.
 - `ekf_test.py`: square-course simulation with a biased gyro. Final position error is ~0.06 m with the EKF versus ~0.54 m with dead reckoning, and the gyro bias estimate converges (see Results).
 - Tools: `calibrate_camera.py` (checkerboard calibration) and `jetson_hsv_tuner.py` (live threshold tuning).
 
+## Carrier board (`hardware/`)
+
+A 2-layer KiCad carrier board for the Teensy 4.1 (**Rev A, design stage: not fabricated or tested yet**). It replaces the hand wiring and fixes its electrical risks: 5 V HC-SR04 echo levels into 3.3 V-only pins, QTR-8A outputs above the ADC range, 3.3 V drive into the DM556 optocouplers, the 15 V wire in the hoverboard UART cable, and a software-only E-stop. The board adds a 24 V input with fuse, reverse-polarity and TVS protection, an LMR16006 24 V → 5 V buck, and a hardware E-stop that drops the motor-power contactor regardless of software.
+
+The schematic and PCB are generated from one netlist (`hardware/gen/design.py`), checked for schematic/PCB parity and run through KiCad DRC. Fabrication outputs (Gerber, drill, BOM, pick-and-place) are in `hardware/output/`. Design decisions and calculations: [`hardware/DESIGN.md`](hardware/DESIGN.md); harness: [`hardware/WIRING.md`](hardware/WIRING.md).
+
+The firmware supports the board behind `CARRIER_BOARD_REV` (`pio run -e teensy41_carrier`); the default build is unchanged.
+
 ## Results
 
 ![EKF localization on a simulated square course](docs/img/ekf_localization.png)

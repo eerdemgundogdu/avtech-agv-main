@@ -1,0 +1,44 @@
+name: hardware
+on:
+  push:
+    paths: ['hardware/**', '.github/workflows/hardware.yml']
+  pull_request:
+    paths: ['hardware/**', '.github/workflows/hardware.yml']
+
+jobs:
+  kicad:
+    # Tasiyici kart: KiCad 9 ile ERC ve sematik paritesi dahil DRC.
+    runs-on: ubuntu-latest
+    container: kicad/kicad:9.0
+    defaults:
+      run:
+        working-directory: hardware/avtech-agv-carrier
+    steps:
+      - uses: actions/checkout@v4
+      - name: ERC
+        run: |
+          kicad-cli sch erc --format json --severity-error --exit-code-violations \
+            -o /tmp/erc.json avtech-agv-carrier.kicad_sch && ok=1 || ok=0
+          python3 - <<'EOF'
+          import json
+          d = json.load(open('/tmp/erc.json'))
+          for s in d.get('sheets', []):
+              for v in s.get('violations', []):
+                  items = '; '.join(i.get('description', '') for i in v.get('items', []))
+                  print(f"::{'error' if v['severity'] == 'error' else 'warning'}::ERC {v['type']}: {v['description']} [{items}]")
+          EOF
+          test "$ok" = 1
+      - name: DRC (sematik paritesi dahil)
+        run: |
+          kicad-cli pcb drc --format json --schematic-parity --refill-zones \
+            --severity-error --exit-code-violations \
+            -o /tmp/drc.json avtech-agv-carrier.kicad_pcb && ok=1 || ok=0
+          python3 - <<'EOF'
+          import json
+          d = json.load(open('/tmp/drc.json'))
+          for key in ('violations', 'unconnected_items', 'schematic_parity'):
+              for v in d.get(key, []):
+                  items = '; '.join(i.get('description', '') for i in v.get('items', []))
+                  print(f"::{'error' if v['severity'] == 'error' else 'warning'}::{key} {v['type']}: {v['description']} [{items}]")
+          EOF
+          test "$ok" = 1

@@ -297,11 +297,16 @@ void setup()
     analogReadResolution(ADC_RESOLUTION);
     line_assembler_init(&cmd_line);
 
-    pinMode(ESTOP_PIN, INPUT_PULLUP);
+    pinMode(ESTOP_PIN, ESTOP_PIN_MODE);
     pinMode(BUZZER_PIN, OUTPUT);
     pinMode(STATUS_LED_PIN, OUTPUT);
     digitalWrite(BUZZER_PIN, LOW);
     digitalWrite(STATUS_LED_PIN, LOW);
+
+#ifdef MOTOR_EN_PIN
+    pinMode(MOTOR_EN_PIN, OUTPUT);
+    digitalWrite(MOTOR_EN_PIN, LOW);      // acilis tamamlanana kadar motor gucu kapali
+#endif
 
     hoverboard_init();
 #if !MANUAL_ONLY_MODE
@@ -350,6 +355,14 @@ void loop()
         link_lost_latched = false;
         Serial.println("[SYS] Jetson baglantisi geri geldi");
     }
+
+#ifdef MOTOR_EN_PIN
+    // 2b) Kontaktor: ariza yok, Jetson baglantisi var ve E-stop basili degilse
+    // motor gucu acik. E-stop ayrica donanimda bobini keser; bu sadece ek katman.
+    digitalWrite(MOTOR_EN_PIN,
+                 (nav_get_state() != NAV_FAULT && jetson_link_ok(now) && !nav_estop_pressed())
+                     ? HIGH : LOW);
+#endif
 
     // 3) Hoverboard feedback
     hoverboard_receive();

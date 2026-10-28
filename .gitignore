@@ -4,3 +4,12 @@ build/
 calib_images/
 camera_calib.json
 .pio/
+
+# KiCad
+*-backups/
+*.kicad_prl
+fp-info-cache
+*.lck
+hardware/avtech-agv-carrier/placement.kicad_pcb
+hardware/avtech-agv-carrier/routed.kicad_pcb
+hardware/output/gerber/

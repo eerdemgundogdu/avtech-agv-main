@@ -1,0 +1,3 @@
+(sym_lib_table
+  (lib (name "avtech")(type "KiCad")(uri "${KIPRJMOD}/avtech.kicad_sym")(options "")(descr "AVTECH proje sembolleri"))
+)

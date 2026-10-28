@@ -237,7 +237,7 @@ void nav_init(void)
     manual_speed = 0;
     manual_steer = 0;
 
-    pinMode(ESTOP_PIN, INPUT_PULLUP);
+    pinMode(ESTOP_PIN, ESTOP_PIN_MODE);
     stepper_init();
 
 #if FORK_BOOT_HOME_DOWN
