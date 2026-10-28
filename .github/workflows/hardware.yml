@@ -33,7 +33,7 @@ jobs:
           test "$ok" = 1
       - name: DRC (sematik paritesi dahil)
         run: |
-          kicad-cli pcb drc --format json --schematic-parity --refill-zones \
+          kicad-cli pcb drc --format json --schematic-parity \
             --severity-error --exit-code-violations \
             -o /tmp/drc.json avtech-agv-carrier.kicad_pcb > /tmp/drc.log 2>&1 && ok=1 || ok=0
           sed 's/^/::notice::kicad-cli: /' /tmp/drc.log | head -20
