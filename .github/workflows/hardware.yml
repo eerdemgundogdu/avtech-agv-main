@@ -44,11 +44,11 @@ jobs:
               raise SystemExit
           d = json.load(open('/tmp/drc.json'))
           for key, val in d.items():
-              if not isinstance(val, list):
+              if not isinstance(val, list) or (val and not isinstance(val[0], dict)):
                   continue
               print(f'::notice::{key}: {len(val)}')
               for v in val[:30]:
-                  items = '; '.join(i.get('description', '') for i in v.get('items', []))
+                  items = '; '.join(f"{i.get('description', '')} @{i.get('pos')}" for i in v.get('items', []))
                   sev = v.get('severity', 'error')
                   print(f"::{'error' if sev == 'error' else 'warning'}::{key} {v.get('type')}: {v.get('description')} [{items}]")
           EOF
