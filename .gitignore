@@ -3,3 +3,4 @@ __pycache__/
 build/
 calib_images/
 camera_calib.json
+.pio/

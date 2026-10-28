@@ -26,7 +26,8 @@ def square_path():
     return cmds
 
 
-def run(seed=0):
+def run(seed=0, trace=None):
+    """trace bir liste ise her adimda (gercek, dead reckoning, EKF) konumlari eklenir."""
     rng = np.random.default_rng(seed)
     ekf = EkfLocalization()
     true = np.zeros(3)
@@ -67,6 +68,8 @@ def run(seed=0):
                                         bearing + rng.normal(0, math.radians(2)))
 
         px, py, _ = ekf.pose
+        if trace is not None:
+            trace.append((true[0], true[1], dr[0], dr[1], px, py))
         err_ekf.append(math.hypot(px - true[0], py - true[1]))
         err_dr.append(math.hypot(dr[0] - true[0], dr[1] - true[1]))
 

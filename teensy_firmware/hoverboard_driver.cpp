@@ -19,9 +19,8 @@ static OdometryData  odom_right   = {};
 static RampState     ramp_speed   = {};
 static RampState     ramp_steer   = {};
 
-// Feedback parse buffer
-static uint8_t   recv_buf[sizeof(HoverFeedback)];
-static uint16_t  recv_idx  = 0;
+// Feedback cozucu durumu (hover_protocol.cpp)
+static HoverRx   hover_rx;
 
 // Odometri sabitleri
 // Hoverboard tekerlek çapı ~16.5cm → çevre = 0.5184m
@@ -32,94 +31,53 @@ static const float WHEEL_CIRCUMFERENCE_M = 0.165f * 3.14159f;  // ~0.5184m
 static const float SPEED_TO_RPS = 1.0f / 60.0f;  // RPM → RPS
 static const float ODOM_VELOCITY_FILTER = 0.85f;  // Düşük geçiş filtre katsayısı
 
-// FOC firmware checksum'ı 16-bit word bazında XOR yapıyor.
-// Komut: start ^ steer ^ speed
-// Feedback: start ^ cmd1 ^ cmd2 ^ speedR ^ speedL ^ batV ^ boardT ^ cmdLed
-static uint16_t calc_checksum_words(const uint16_t *words, uint16_t word_count)
-{
-    uint16_t checksum = 0;
-    for (uint16_t i = 0; i < word_count; i++) {
-        checksum ^= words[i];
-    }
-    return checksum;
-}
-
 static void send_command_raw(HardwareSerial &port, int16_t steer, int16_t speed)
 {
-    HoverCommand cmd;
-    cmd.start = HOVER_START_FRAME;
-    cmd.steer = steer;
-    cmd.speed = speed;
-    // Word-level XOR: start(uint16) ^ steer(cast to uint16) ^ speed(cast to uint16)
-    cmd.checksum = cmd.start ^ (uint16_t)cmd.steer ^ (uint16_t)cmd.speed;
-    port.write((uint8_t *)&cmd, sizeof(cmd));
+    uint8_t frame[HOVER_CMD_LEN];
+    hover_encode_command(steer, speed, frame);
+    port.write(frame, sizeof(frame));
 }
 
-static bool parse_feedback(HardwareSerial &port, uint8_t *buf, uint16_t &idx)
+static void apply_feedback(const HoverFeedback &fb, uint32_t now)
+{
+    motor_left.connected     = true;
+    motor_left.cmd_echo      = fb.cmd1;
+    motor_left.speedL_raw    = fb.speedL_meas;
+    motor_left.speedR_raw    = fb.speedR_meas;
+    motor_left.speed_meas    = fb.speedL_meas;
+    motor_left.bat_voltage   = fb.batVoltage;
+    motor_left.board_temp    = fb.boardTemp;
+    motor_left.last_recv_ms  = now;
+    motor_left.recv_count++;
+
+    motor_right.connected    = true;
+    motor_right.cmd_echo     = fb.cmd2;
+    motor_right.speedL_raw   = fb.speedL_meas;
+    motor_right.speedR_raw   = fb.speedR_meas;
+    motor_right.speed_meas   = fb.speedR_meas;
+    motor_right.bat_voltage  = fb.batVoltage;
+    motor_right.board_temp   = fb.boardTemp;
+    motor_right.last_recv_ms = now;
+    motor_right.recv_count++;
+}
+
+static bool parse_feedback(HardwareSerial &port)
 {
     bool got_new = false;
+    HoverFeedback fb;
 
     while (port.available()) {
-        uint8_t byte_in = port.read();
-
-        // Start frame tespiti (little-endian: 0xCD sonra 0xAB)
-        if (idx < 2) {
-            if (idx == 0 && byte_in == (HOVER_START_FRAME & 0xFF)) {
-                buf[idx++] = byte_in;
-            } else if (idx == 1 && byte_in == ((HOVER_START_FRAME >> 8) & 0xFF)) {
-                buf[idx++] = byte_in;
-            } else {
-                // İlk byte 0xCD ile eşleşmiyorsa tamamen sıfırla,
-                // ama gelen byte 0xCD ise yeni paket başlangıcı olabilir
-                if (byte_in == (HOVER_START_FRAME & 0xFF)) {
-                    buf[0] = byte_in;
-                    idx = 1;
-                } else {
-                    idx = 0;
-                }
-            }
-        } else {
-            buf[idx++] = byte_in;
-
-            if (idx >= sizeof(HoverFeedback)) {
-                HoverFeedback *fb = (HoverFeedback *)buf;
-
-                // Word-level XOR checksum doğrulama
-                // Checksum hariç tüm 16-bit word'lerin XOR'u
-                uint16_t num_words = (sizeof(HoverFeedback) - sizeof(uint16_t)) / sizeof(uint16_t);
-                uint16_t expected = calc_checksum_words((uint16_t *)buf, num_words);
-
-                if (fb->checksum == expected) {
-                    // Sol Motor
-                    motor_left.connected     = true;
-                    motor_left.cmd_echo      = fb->cmd1;
-                    motor_left.speedL_raw    = fb->speedL_meas;
-                    motor_left.speedR_raw    = fb->speedR_meas;
-                    motor_left.speed_meas    = fb->speedL_meas;
-                    motor_left.bat_voltage   = fb->batVoltage;
-                    motor_left.board_temp    = fb->boardTemp;
-                    motor_left.last_recv_ms  = millis();
-                    motor_left.recv_count++;
-
-                    // Sağ Motor
-                    motor_right.connected    = true;
-                    motor_right.cmd_echo     = fb->cmd2;
-                    motor_right.speedL_raw   = fb->speedL_meas;
-                    motor_right.speedR_raw   = fb->speedR_meas;
-                    motor_right.speed_meas   = fb->speedR_meas;
-                    motor_right.bat_voltage  = fb->batVoltage;
-                    motor_right.board_temp   = fb->boardTemp;
-                    motor_right.last_recv_ms = millis();
-                    motor_right.recv_count++;
-
-                    got_new = true;
-                } else {
-                    motor_left.checksum_errors++;
-                    motor_right.checksum_errors++;
-                }
-
-                idx = 0; // Sonraki paket
-            }
+        switch (hover_rx_feed(&hover_rx, (uint8_t)port.read(), &fb)) {
+        case HOVER_RX_FRAME:
+            apply_feedback(fb, millis());
+            got_new = true;
+            break;
+        case HOVER_RX_BAD_CHECKSUM:
+            motor_left.checksum_errors++;
+            motor_right.checksum_errors++;
+            break;
+        default:
+            break;
         }
     }
 
@@ -134,29 +92,8 @@ static bool parse_feedback(HardwareSerial &port, uint8_t *buf, uint16_t &idx)
 
 static int16_t apply_ramp(RampState &ramp, uint32_t now)
 {
-    if (ramp.current == ramp.target) {
-        return ramp.current;
-    }
-
-    ramp.last_ramp_ms = now;
-
-    int16_t diff = ramp.target - ramp.current;
-
-    // Durdurma durumunda daha hızlı ramp (güvenlik)
-    int16_t step = MOTOR_RAMP_STEP;
-    if (ramp.target == 0) {
-        step = MOTOR_RAMP_STEP * 2; // 2x hızlı durdurma
-    }
-
-    if (diff > step) {
-        ramp.current += step;
-    } else if (diff < -step) {
-        ramp.current -= step;
-    } else {
-        ramp.current = ramp.target;
-    }
-
-    return ramp.current;
+    if (ramp.current != ramp.target) ramp.last_ramp_ms = now;
+    return hover_ramp_step(&ramp, MOTOR_RAMP_STEP);
 }
 
 void hoverboard_init(void)
@@ -170,7 +107,7 @@ void hoverboard_init(void)
     memset(&odom_right,  0, sizeof(OdometryData));
     memset(&ramp_speed,  0, sizeof(RampState));
     memset(&ramp_steer,  0, sizeof(RampState));
-    recv_idx = 0;
+    hover_rx_init(&hover_rx);
 
     // Başlangıçta motorları durdur
     send_command_raw(HOVER_SERIAL, 0, 0);
@@ -215,7 +152,7 @@ void hoverboard_soft_stop(void)
 
 void hoverboard_receive(void)
 {
-    parse_feedback(HOVER_SERIAL, recv_buf, recv_idx);
+    parse_feedback(HOVER_SERIAL);
 }
 
 void hoverboard_update_ramp(void)

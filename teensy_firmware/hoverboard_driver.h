@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include "config.h"
+#include "hover_protocol.h"
 
 // ============================================================================
 //  Hoverboard FOC Firmware — USART Protocol (VARIANT_USART + SPD_MODE)
@@ -17,29 +18,8 @@
 //    #define CTRL_MOD_REQ    SPD_MODE
 // ============================================================================
 
-// ── Komut paketi (Teensy → Hoverboard) ──────────────────────────────────────
-// Start frame: 0xABCD (little-endian: first byte 0xCD, second 0xAB)
-// Payload: steer (int16), speed (int16)
-// Checksum: XOR of all preceding 16-bit words
-typedef struct __attribute__((packed)) {
-    uint16_t start;       // START_FRAME = 0xABCD
-    int16_t  steer;       // Dönüş komutu (-1000 ↔ +1000)
-    int16_t  speed;       // Hız komutu   (-1000 ↔ +1000)
-    uint16_t checksum;    // XOR checksum (word-level)
-} HoverCommand;
-
-// ── Feedback paketi (Hoverboard → Teensy) ───────────────────────────────────
-typedef struct __attribute__((packed)) {
-    uint16_t start;       // START_FRAME = 0xABCD
-    int16_t  cmd1;        // Motor 1 komutu (echo)
-    int16_t  cmd2;        // Motor 2 komutu (echo)
-    int16_t  speedR_meas; // Sağ motor hız ölçümü (RPM * dahili çarpan)
-    int16_t  speedL_meas; // Sol motor hız ölçümü (RPM * dahili çarpan)
-    int16_t  batVoltage;  // Batarya gerilimi (x100, ör: 2400 = 24.00V)
-    int16_t  boardTemp;   // Kart sıcaklığı (x10, ör: 385 = 38.5°C)
-    uint16_t cmdLed;      // LED kontrol (kullanılmıyor)
-    uint16_t checksum;    // XOR checksum (word-level)
-} HoverFeedback;
+// Cerceve yapilari (HoverCommand, HoverFeedback), checksum, geri bildirim
+// cozucusu ve rampa: hover_protocol.h (Arduino'dan bagimsiz, host'ta test edilir)
 
 // ── Motor durumu (genişletilmiş) ────────────────────────────────────────────
 typedef struct {
@@ -63,13 +43,6 @@ typedef struct {
     float    velocity_filtered;  // Düşük geçiş filtreli hız
     uint32_t last_update_ms;
 } OdometryData;
-
-// ── Ramping (yumuşak hız geçişi) ────────────────────────────────────────────
-typedef struct {
-    int16_t  current;            // Mevcut (ramplanmış) hız
-    int16_t  target;             // Hedef hız
-    uint32_t last_ramp_ms;       // Son ramp güncelleme zamanı
-} RampState;
 
 // ── Public API ──────────────────────────────────────────────────────────────
 

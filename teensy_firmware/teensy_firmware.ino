@@ -33,6 +33,7 @@
 #include "obstacle_detector.h"
 #include "imu_handler.h"
 #include "navigation.h"
+#include "cmd_parser.h"
 
 // --- Global State ---
 
@@ -48,71 +49,18 @@ static uint32_t       last_jetson_rx_ms  = 0;
 static bool           hb_seen            = false;   // İlk hb gelince watchdog devreye girer
 static bool           link_lost_latched  = false;
 
-// JSON komut buffer
-static char           cmd_buffer[256];
-static int            cmd_idx = 0;
-static bool           cmd_overflow = false;
+// Jetson komut satiri birlestirici (cmd_parser.cpp)
+static LineAssembler  cmd_line;
 
 // --- JSON Ayrıştırma ---
-// Python json.dumps varsayılanı '"cmd": "manual"' (iki noktadan sonra boşluk) üretir;
-// ayrıştırıcı boşluklara toleranslıdır. Anahtar, değer olarak geçen aynı metinle karışmaz.
-
-static bool json_get(const char *json, const char *key, char *out, int max_len)
-{
-    char pat[40];
-    snprintf(pat, sizeof(pat), "\"%s\"", key);
-    const size_t plen = strlen(pat);
-    const char *p = json;
-
-    while ((p = strstr(p, pat)) != NULL) {
-        const char *q = p + plen;
-        while (*q == ' ' || *q == '\t') q++;
-        if (*q != ':') { p += plen; continue; }   // Bu bir değer, anahtar değil
-        q++;
-        while (*q == ' ' || *q == '\t') q++;
-
-        int i = 0;
-        if (*q == '"') {
-            q++;
-            while (*q && *q != '"' && i < max_len - 1) out[i++] = *q++;
-            if (*q != '"') return false;          // Kesik/çok uzun metin
-        } else {
-            while (*q && *q != ',' && *q != '}' && *q != ' ' && *q != '\t' && i < max_len - 1) {
-                out[i++] = *q++;
-            }
-        }
-        out[i] = '\0';
-        return i > 0;
-    }
-    return false;
-}
-
-static bool json_get_long(const char *json, const char *key, long *out)
-{
-    char buf[24];
-    if (!json_get(json, key, buf, sizeof(buf))) return false;
-    char *end = NULL;
-    long v = strtol(buf, &end, 10);
-    if (end == buf) return false;
-    *out = v;
-    return true;
-}
-
-static bool json_get_float(const char *json, const char *key, float *out)
-{
-    char buf[24];
-    if (!json_get(json, key, buf, sizeof(buf))) return false;
-    char *end = NULL;
-    float v = strtof(buf, &end);
-    if (end == buf || isnan(v) || isinf(v)) return false;
-    *out = v;
-    return true;
-}
+// Anahtar okuyucu ve satir birlestirici cmd_parser.cpp'de (host'ta test ediliyor).
+// Python json.dumps varsayılanı '"cmd": "manual"' (iki noktadan sonra boşluk)
+// üretir; ayrıştırıcı boşluklara toleranslıdır.
 
 static void process_jetson_command(const char *json)
 {
     char cmd_str[32];
-    if (!json_get(json, "cmd", cmd_str, sizeof(cmd_str))) {
+    if (!cmd_json_get(json, "cmd", cmd_str, sizeof(cmd_str))) {
         return;
     }
 
@@ -122,8 +70,8 @@ static void process_jetson_command(const char *json)
     }
     else if (strcmp(cmd_str, "manual") == 0) {
         long spd = 0, str = 0;
-        json_get_long(json, "speed", &spd);
-        json_get_long(json, "steer", &str);
+        cmd_json_get_long(json, "speed", &spd);
+        cmd_json_get_long(json, "steer", &str);
         spd = constrain(spd, MOTOR_SPEED_MIN, MOTOR_SPEED_MAX);
         str = constrain(str, -MOTOR_STEER_MAX, MOTOR_STEER_MAX);
         nav_cmd_manual((int16_t)spd, (int16_t)str);
@@ -139,7 +87,7 @@ static void process_jetson_command(const char *json)
     }
     else if (strcmp(cmd_str, "forklift") == 0) {
         char action[16];
-        if (!json_get(json, "action", action, sizeof(action))) return;
+        if (!cmd_json_get(json, "action", action, sizeof(action))) return;
         if (strcmp(action, "up") == 0) {
             nav_cmd_forklift(true);
         } else if (strcmp(action, "down") == 0) {
@@ -150,24 +98,24 @@ static void process_jetson_command(const char *json)
             nav_cmd_fork_zero();
         } else if (strcmp(action, "jog") == 0) {
             long steps = 0, nolimit = 0;
-            if (json_get_long(json, "steps", &steps) && steps != 0) {
-                json_get_long(json, "nolimit", &nolimit);
+            if (cmd_json_get_long(json, "steps", &steps) && steps != 0) {
+                cmd_json_get_long(json, "nolimit", &nolimit);
                 nav_cmd_fork_jog((int32_t)steps, nolimit != 0);
             }
         } else if (strcmp(action, "goto") == 0) {
             long pos = 0;
-            if (json_get_long(json, "pos", &pos)) {
+            if (cmd_json_get_long(json, "pos", &pos)) {
                 nav_cmd_fork_goto((int32_t)pos);
             }
         } else if (strcmp(action, "hold") == 0) {
             long dir = 0;
-            json_get_long(json, "dir", &dir);
+            cmd_json_get_long(json, "dir", &dir);
             nav_cmd_fork_hold((int8_t)constrain(dir, -1, 1));
         }
     }
     else if (strcmp(cmd_str, "hold") == 0) {
         long on = 1;
-        json_get_long(json, "on", &on);
+        cmd_json_get_long(json, "on", &on);
         nav_cmd_hold_enable(on != 0);
     }
     else if (strcmp(cmd_str, "start") == 0) {
@@ -175,32 +123,32 @@ static void process_jetson_command(const char *json)
     }
     else if (strcmp(cmd_str, "turn") == 0) {
         float angle;
-        if (json_get_float(json, "angle", &angle)) {
+        if (cmd_json_get_float(json, "angle", &angle)) {
             nav_cmd_turn(constrain(angle, -360.0f, 360.0f));
         }
     }
     else if (strcmp(cmd_str, "forward") == 0) {
         long dur;
-        if (json_get_long(json, "duration", &dur)) {
+        if (cmd_json_get_long(json, "duration", &dur)) {
             nav_cmd_forward((int)dur);
         }
     }
     else if (strcmp(cmd_str, "fused_line") == 0) {
         float offset = 0.0f;
         char source[16] = "";
-        json_get_float(json, "offset", &offset);
-        json_get(json, "source", source, sizeof(source));
+        cmd_json_get_float(json, "offset", &offset);
+        cmd_json_get(json, "source", source, sizeof(source));
         nav_set_fused_line(offset, source);
     }
     else if (strcmp(cmd_str, "sync_yaw") == 0) {
         float yaw;
-        if (json_get_float(json, "yaw", &yaw)) {
+        if (cmd_json_get_float(json, "yaw", &yaw)) {
             imu_set_yaw(yaw);
         }
     }
     else if (strcmp(cmd_str, "slow_forward") == 0) {
         long spd = 80;
-        json_get_long(json, "speed", &spd);
+        cmd_json_get_long(json, "speed", &spd);
         nav_cmd_slow_forward((int16_t)constrain(spd, 0, MOTOR_SPEED_MAX));
     }
 }
@@ -208,19 +156,10 @@ static void process_jetson_command(const char *json)
 static void read_jetson_serial(uint32_t now)
 {
     while (JETSON_SERIAL.available()) {
-        char c = JETSON_SERIAL.read();
-        if (c == '\n' || c == '\r') {
-            if (cmd_idx > 0 && !cmd_overflow) {
-                cmd_buffer[cmd_idx] = '\0';
-                last_jetson_rx_ms = now;
-                process_jetson_command(cmd_buffer);
-            }
-            cmd_idx = 0;
-            cmd_overflow = false;          // Taşan satır tamamen atılır (kesik komut çalıştırılmaz)
-        } else if (cmd_idx < (int)(sizeof(cmd_buffer) - 1)) {
-            cmd_buffer[cmd_idx++] = c;
-        } else {
-            cmd_overflow = true;
+        // Taşan satır tamamen atılır (kesik komut çalıştırılmaz)
+        if (line_assembler_feed(&cmd_line, (char)JETSON_SERIAL.read())) {
+            last_jetson_rx_ms = now;
+            process_jetson_command(cmd_line.buf);
         }
     }
 }
@@ -356,6 +295,7 @@ void setup()
     JETSON_SERIAL.println("========================================");
 
     analogReadResolution(ADC_RESOLUTION);
+    line_assembler_init(&cmd_line);
 
     pinMode(ESTOP_PIN, INPUT_PULLUP);
     pinMode(BUZZER_PIN, OUTPUT);
