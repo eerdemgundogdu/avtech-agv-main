@@ -189,7 +189,7 @@ Derleme: `pio run -e teensy41_carrier`. CI iki varyantı da derler.
 | Kontrol | Sonuç |
 |---------|-------|
 | Şematik ↔ tasarım bağlantı paritesi (KiCad netlist'i `design.py` ile karşılaştırıldı) | 63 / 63 net birebir aynı |
-| KiCad DRC (KiCad 7, yerel) | 0 ihlal, 0 bagli olmayan ped; ayrinti: [output/drc_report.txt](output/drc_report.txt). CI ayrica KiCad 9 ile ERC + DRC (sematik paritesi dahil) calistirir |
+| KiCad DRC (KiCad 7, yerel) | 0 ihlal, 0 bagli olmayan ped; ayrinti: [output/drc_report.txt](output/drc_report.txt). CI ayrica KiCad 9 ile ERC + DRC (sematik paritesi dahil) calistirir. Teensy soketinin GND pinleri dokume termal kol yerine tam baglanir (ust katmandaki dokum pin siralari arasinda adalara bolundugu icin) |
 | Datasheet hesapları | Bu dokümanda (bölüm 4–8) |
 
 **Yapılmayanlar:** Kart üretilmedi ve ölçülmedi; devre simülasyonu (SPICE) ve termal analiz yapılmadı. Footprint'ler KiCad standart kütüphanesinden alındı; Teensy 4.1 footprint'i ve pin sırası PJRC pin kartından elle girildi ve **siparişten önce gerçek bir Teensy'yle karşılaştırılmalı**.

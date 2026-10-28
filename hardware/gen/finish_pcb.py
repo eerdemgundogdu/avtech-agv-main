@@ -25,6 +25,12 @@ def add_gnd_zones(board):
     gnd = board.FindNet('GND')
     inset = 0.3
     w, h = make_pcb.BOARD_W, make_pcb.BOARD_H
+    # Teensy soket GND pinleri: iki sira arasindaki ust katman dokumu kucuk adalara
+    # bolunuyor; termal kollar bu adalara dusunce KiCad 9 "starved_thermal" verir.
+    # Bu pinlerde dokume tam (solid) baglanti kullan.
+    for pad in board.FindFootprintByReference('U3').Pads():
+        if pad.GetNetname() == 'GND':
+            pad.SetZoneConnection(pcbnew.ZONE_CONNECTION_FULL)
     for layer in (pcbnew.F_Cu, pcbnew.B_Cu):
         z = pcbnew.ZONE(board)
         z.SetLayer(layer)
